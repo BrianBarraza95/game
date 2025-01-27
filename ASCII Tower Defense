@@ -1,0 +1,463 @@
+import React, { useState, useEffect } from 'react';
+
+const TowerDefense = () => {
+  const CELL_SIZE = 48;
+  const GRID_WIDTH = 8;
+  const GRID_HEIGHT = 13;
+  const TOWER_COST = 50;
+  const ENEMY_REWARD = 25;
+
+  const [currentView, setCurrentView] = useState('game');
+  const [currentPath, setCurrentPath] = useState([]);
+  const [selectedTower, setSelectedTower] = useState(false);
+  const [gameState, setGameState] = useState({
+    path: null,
+    towers: [],
+    enemies: [],
+    money: 100,
+    lives: 3,
+    level: 1,
+    wave: 1,
+    waveCount: 3,
+    enemiesInWave: Math.floor(Math.random() * 5) + 6,
+    currentEnemyCount: 0,
+    gameOver: false,
+    projectiles: [],
+    enemyHealth: 100
+  });
+  const [message, setMessage] = useState('');
+  const [showMenu, setShowMenu] = useState(false);
+  const [pathCompleted, setPathCompleted] = useState(false);
+  const [gameStartCountdown, setGameStartCountdown] = useState(null);
+  const [enemyPosition, setEnemyPosition] = useState(null);
+
+  useEffect(() => {
+    if (gameStartCountdown === null) return;
+    
+    const timer = setTimeout(() => {
+      if (gameStartCountdown > 0) {
+        setGameStartCountdown(prev => prev - 1);
+      } else if (gameState.path) {
+        setEnemyPosition(0);
+      }
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [gameStartCountdown, gameState.path]);
+
+  // Effect for enemy movement
+  useEffect(() => {
+    if (enemyPosition !== null && gameState.path) {
+      const moveTimer = setInterval(() => {
+        setEnemyPosition(prev => {
+          if (prev < gameState.path.length - 1) {
+            return prev + 1;
+          }
+          setGameState(prev => ({
+            ...prev,
+            lives: prev.lives - 1,
+            gameOver: prev.lives <= 1,
+            enemyHealth: 100
+          }));
+          return null;
+        });
+      }, 1000);
+
+      return () => clearInterval(moveTimer);
+    }
+  }, [enemyPosition, gameState.path]);
+
+  // Separate effect for tower attacks
+  useEffect(() => {
+    if (enemyPosition !== null && gameState.path && gameState.towers.length > 0) {
+      const attackTimer = setInterval(() => {
+        const currentEnemyPos = gameState.path[enemyPosition];
+        const adjacentTowers = gameState.towers.filter(tower => 
+          isAdjacent(tower.x, tower.y, currentEnemyPos[0], currentEnemyPos[1])
+        );
+        
+        if (adjacentTowers.length > 0) {
+          const totalDamage = adjacentTowers.length * 25;
+          const newHealth = gameState.enemyHealth - totalDamage;
+          
+          if (newHealth <= 0) {
+            setGameState(prev => ({
+              ...prev,
+              enemyHealth: 100,
+              money: prev.money + ENEMY_REWARD,
+              currentEnemyCount: prev.currentEnemyCount + 1
+            }));
+            setEnemyPosition(null); // Reset enemy position when defeated
+          } else {
+            setGameState(prev => ({
+              ...prev,
+              enemyHealth: newHealth,
+              projectiles: [
+                ...prev.projectiles,
+                ...adjacentTowers.map(tower => ({
+                  from: tower,
+                  to: currentEnemyPos
+                }))
+              ]
+            }));
+          }
+
+          // Clear projectiles after animation
+          setTimeout(() => {
+            setGameState(prev => ({
+              ...prev,
+              projectiles: prev.projectiles.slice(adjacentTowers.length)
+            }));
+          }, 300);
+        }
+      }, 800);
+
+      return () => clearInterval(attackTimer);
+    }
+  }, [enemyPosition, gameState.path, gameState.towers.length, gameState.enemyHealth]);
+
+  useEffect(() => {
+    if (!gameState.path || gameState.gameOver || enemyPosition !== null) return;
+    
+    const spawnTimer = setInterval(() => {
+      if (gameState.currentEnemyCount >= gameState.enemiesInWave) {
+        if (gameState.wave >= gameState.waveCount) {
+          clearInterval(spawnTimer);
+          return;
+        }
+        setGameState(prev => ({
+          ...prev,
+          wave: prev.wave + 1,
+          currentEnemyCount: 0,
+          enemiesInWave: Math.floor(Math.random() * 5) + 6
+        }));
+      } else {
+        setGameState(prev => ({
+          ...prev,
+          currentEnemyCount: prev.currentEnemyCount + 1
+        }));
+      }
+      setEnemyPosition(0);
+    }, 2000);
+
+    return () => clearInterval(spawnTimer);
+  }, [enemyPosition, gameState.path, gameState.gameOver, gameState.currentEnemyCount, gameState.enemiesInWave, gameState.wave, gameState.waveCount]);
+
+  const getProgressPercentage = () => {
+    if (gameState.enemiesInWave === 0) return 0;
+    return (gameState.currentEnemyCount / gameState.enemiesInWave) * 100;
+  };
+
+  const isEdgeCell = (x, y) => {
+    return (x === 0 || x === GRID_WIDTH - 1 || y === 0 || y === GRID_HEIGHT - 1) && 
+           !(x === 0 && y === 0) && 
+           !(x === GRID_WIDTH - 1 && y === 0) && 
+           !(x === 0 && y === GRID_HEIGHT - 1) && 
+           !(x === GRID_WIDTH - 1 && y === GRID_HEIGHT - 1);
+  };
+
+  const isAdjacent = (x1, y1, x2, y2) => {
+    return Math.abs(x1 - x2) + Math.abs(y1 - y2) === 1;
+  };
+
+  const isAdjacentToPath = (x, y) => {
+    if (!gameState.path) return false;
+    return gameState.path.some(([pathX, pathY]) => 
+      isAdjacent(x, y, pathX, pathY) && !gameState.path.some(([px, py]) => px === x && py === y)
+    );
+  };
+
+  const handleCellClick = (x, y) => {
+    if (currentView === 'builder') {
+      handleBuilderClick(x, y);
+    } else if (selectedTower && isAdjacentToPath(x, y) && !gameState.towers.some(t => t.x === x && t.y === y)) {
+      if (gameState.money >= TOWER_COST) {
+        setGameState(prev => ({
+          ...prev,
+          towers: [...prev.towers, { x, y }],
+          money: prev.money - TOWER_COST
+        }));
+        setSelectedTower(false);
+      } else {
+        setMessage('Not enough money for tower');
+        setTimeout(() => setMessage(''), 2000);
+      }
+    }
+  };
+
+  const handleBuilderClick = (x, y) => {
+    if (currentPath.length === 0) {
+      if (!isEdgeCell(x, y)) {
+        setMessage('First cell must be on edge (not corner)');
+        return;
+      }
+      setCurrentPath([[x, y]]);
+      setMessage('Select next cell');
+    } else {
+      const [lastX, lastY] = currentPath[currentPath.length - 1];
+      
+      if (!isAdjacent(x, y, lastX, lastY)) {
+        setMessage('Must select adjacent cell');
+        return;
+      }
+
+      if (currentPath.some(([px, py]) => px === x && py === y)) {
+        setMessage('Cell already in path');
+        return;
+      }
+
+      const newPath = [...currentPath, [x, y]];
+      
+      if (isEdgeCell(x, y)) {
+        setMessage('Path completed!');
+        setPathCompleted(true);
+      }
+
+      setCurrentPath(newPath);
+    }
+  };
+
+  const handleSavePath = () => {
+    setGameState(prev => ({
+      ...prev,
+      path: [...currentPath],
+      currentEnemyCount: 0,
+      wave: 1,
+      enemiesInWave: Math.floor(Math.random() * 5) + 6
+    }));
+    setCurrentView('game');
+    setCurrentPath([]);
+    setPathCompleted(false);
+    setGameStartCountdown(3);
+  };
+
+  const GameOverScreen = () => (
+    <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-10">
+      <div className="space-y-4 text-center">
+        <div className="text-2xl mb-4">Game Over!</div>
+        <button 
+          className="px-8 py-2 border border-green-500 text-green-500 block w-full"
+          onClick={() => {
+            setGameState(prev => ({
+              ...prev,
+              lives: 3,
+              gameOver: false,
+              currentEnemyCount: 0,
+              wave: 1,
+              path: null,
+              towers: []
+            }));
+            setCurrentView('builder');
+          }}
+        >
+          Retry
+        </button>
+        <button 
+          className="px-8 py-2 border border-green-500 text-green-500 block w-full"
+          onClick={() => window.location.reload()}
+        >
+          Quit
+        </button>
+      </div>
+    </div>
+  );
+
+  const Menu = () => (
+    <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-10">
+      <div className="space-y-4 text-center">
+        <button 
+          className="px-8 py-2 border border-green-500 text-green-500 block w-full"
+          onClick={() => setShowMenu(false)}
+        >
+          Resume
+        </button>
+        <button 
+          className="px-8 py-2 border border-green-500 text-green-500 block w-full"
+          onClick={() => {
+            setCurrentView('builder');
+            setCurrentPath([]);
+            setMessage('');
+            setShowMenu(false);
+          }}
+        >
+          Path Builder
+        </button>
+      </div>
+    </div>
+  );
+
+  const GameGrid = ({ showPath = null, enemyPos = null }) => (
+    <>
+      <svg width="384" height="624" className="absolute inset-0">
+        {Array.from({ length: GRID_WIDTH + 1 }).map((_, i) => (
+          <line
+            key={`v-${i}`}
+            x1={i * CELL_SIZE}
+            y1="0"
+            x2={i * CELL_SIZE}
+            y2="624"
+            stroke="green"
+            strokeWidth="1"
+            opacity="0.5"
+          />
+        ))}
+        {Array.from({ length: GRID_HEIGHT + 1 }).map((_, i) => (
+          <line
+            key={`h-${i}`}
+            x1="0"
+            y1={i * CELL_SIZE}
+            x2="384"
+            y2={i * CELL_SIZE}
+            stroke="green"
+            strokeWidth="1"
+            opacity="0.5"
+          />
+        ))}
+
+        {(currentPath.length > 0 || showPath) && (showPath || currentPath).map(([x, y], i) => (
+          <rect
+            key={`path-${i}`}
+            x={x * CELL_SIZE}
+            y={y * CELL_SIZE}
+            width={CELL_SIZE}
+            height={CELL_SIZE}
+            fill="#00FF00"
+            opacity="0.5"
+          />
+        ))}
+      </svg>
+
+      <div className="absolute inset-0 grid grid-cols-8 grid-rows-13">
+        {Array.from({ length: GRID_HEIGHT * GRID_WIDTH }).map((_, idx) => {
+          const x = idx % GRID_WIDTH;
+          const y = Math.floor(idx / GRID_WIDTH);
+          const isValidTowerSpot = currentView === 'game' && isAdjacentToPath(x, y) && !gameState.towers.some(t => t.x === x && t.y === y);
+          const hasTower = gameState.towers.some(t => t.x === x && t.y === y);
+          const isEnemy = enemyPos !== null && showPath && 
+                         x === showPath[enemyPos][0] && y === showPath[enemyPos][1];
+          
+          return (
+            <div
+              key={`cell-${x}-${y}`}
+              className={`flex items-center justify-center cursor-pointer text-center
+                ${currentView === 'builder' ? 'hover:bg-green-900 hover:bg-opacity-30' : ''}
+                ${isValidTowerSpot && selectedTower ? 'bg-green-500 bg-opacity-20 hover:bg-opacity-30' : ''}`}
+              onClick={() => handleCellClick(x, y)}
+              style={{ 
+                width: `${CELL_SIZE}px`,
+                height: `${CELL_SIZE}px`
+              }}
+            >
+              {hasTower && <span className="text-2xl">¤</span>}
+              {isEnemy && (
+                <div className="relative w-6 h-6">
+                  <div className="w-6 h-6 bg-green-500 animate-pulse rounded-sm shadow-[0_0_10px_#00ff00] flex items-center justify-center m-auto">
+                    <div className="text-xs text-black font-bold">
+                      {Math.max(0, gameState.enemyHealth)}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {gameState.projectiles.map((projectile, index) => (
+                <div
+                  key={`projectile-${index}`}
+                  className="absolute text-green-500 animate-ping"
+                  style={{
+                    left: `${projectile.from.x * CELL_SIZE + CELL_SIZE/2}px`,
+                    top: `${projectile.from.y * CELL_SIZE + CELL_SIZE/2}px`
+                  }}
+                >
+                  ~
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  const GameUI = () => (
+    <>
+      <img 
+        src="/api/placeholder/384/106" 
+        alt="ASCII Tower Defense" 
+        className="mt-4"
+      />
+
+      <div className="w-96 mt-4">
+        {gameStartCountdown !== null && gameStartCountdown > 0 ? (
+          <div className="text-center text-xl">Game starts in: {gameStartCountdown}</div>
+        ) : (
+          <div className="text-sm">
+            Level: {gameState.level} | Wave: {gameState.wave}/{gameState.waveCount} | 
+            Lives: {gameState.lives} | Money: ${gameState.money}
+          </div>
+        )}
+        <div className="w-full h-6 border border-green-500 mt-2">
+          <div 
+            className="h-full bg-green-500 transition-all duration-300"
+            style={{ width: `${getProgressPercentage()}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="relative mt-4 border border-green-500" style={{ width: '384px', height: '624px' }}>
+        {showMenu && <Menu />}
+        {gameState.gameOver && <GameOverScreen />}
+        <GameGrid showPath={gameState.path} enemyPos={enemyPosition} />
+      </div>
+
+      <div className="w-96 mt-4 flex justify-between">
+        <button 
+          className="px-8 py-2 border border-green-500 text-green-500"
+          onClick={() => setShowMenu(true)}
+        >
+          MENU
+        </button>
+        <button 
+          className={`px-8 py-2 border border-green-500 text-green-500 
+            ${selectedTower ? 'bg-green-500 text-black' : ''}`}
+          onClick={() => setSelectedTower(!selectedTower)}
+        >
+          Place Tower
+        </button>
+      </div>
+    </>
+  );
+
+  const BuilderUI = () => (
+    <>
+      <div className="w-96 mt-4 text-center text-2xl font-bold">
+        ASCII Tower Defense
+      </div>
+      <div className="w-96 mt-4">
+        <div className="text-sm border-b border-green-500 pb-2">Level Builder</div>
+      </div>
+      <div className="relative mt-4 border border-green-500" style={{ width: '384px', height: '624px' }}>
+        <GameGrid />
+      </div>
+      <div className="w-96 mt-4 flex flex-col gap-2">
+        {pathCompleted && (
+          <button 
+            className="px-8 py-2 border border-green-500 text-green-500"
+            onClick={handleSavePath}
+          >
+            Save Path
+          </button>
+        )}
+        {message && (
+          <div className="text-sm text-center">{message}</div>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex flex-col items-center w-[430px] h-[932px] bg-black text-green-500 font-mono">
+      {currentView === 'game' ? <GameUI /> : <BuilderUI />}
+    </div>
+  );
+};
+
+export default TowerDefense;
