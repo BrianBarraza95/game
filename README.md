@@ -27,13 +27,14 @@ Rosebud.ai game maker (exploration that didn't really work)
 -----
 
 Project Video
-See attatched file
+
+![download](https://github.com/user-attachments/assets/4bf515cc-6a4f-415c-93e4-616d5e32a948)
 
 
 ----
 
 Sketches
-See attached file
+(https://github.com/BrianBarraza95/game/blob/main/Img/ASCII-sketch.png)
 
 
 -----
